@@ -321,6 +321,9 @@ void QTermWidget::addSnapShotTimer()
     m_termDisplay = m_impl->m_terminalDisplay;
     connect(m_interactionTimer, &QTimer::timeout, this, &QTermWidget::snapshot);
     connect(m_termDisplay.data(), &Konsole::TerminalDisplay::keyPressedSignal, this, &QTermWidget::interactionHandler);
+    connect(currSession, &Session::almostFinished, m_termDisplay, [=] {
+        connect(m_termDisplay, &TerminalDisplay::keyPressedSignal, currSession, &Session::finished);
+    });
 
     // take a snapshot of the session state periodically in the background
     auto backgroundTimer = new QTimer(currSession);
@@ -346,6 +349,11 @@ void QTermWidget::interactionHandler()
 void QTermWidget::setIsAllowScroll(bool isAllowScroll)
 {
     m_impl->m_terminalDisplay->setIsAllowScroll(isAllowScroll);
+}
+
+void QTermWidget::enableSetCursorPosition(bool enable)
+{
+    m_impl->m_terminalDisplay->setCursorPositionEnable(enable);
 }
 
 /*******************************************************************************
@@ -500,6 +508,10 @@ void QTermWidget::init(int startnow)
     connect(m_impl->m_session, &Session::cursorChanged, this, &QTermWidget::cursorChanged);
     connect(m_impl->m_session, &Session::shellWarningMessage, this, &QTermWidget::shellWarningMessage);
 
+    // Ctrl + Mouse click to move cursor: handle from TerminalDisplay
+    connect(m_impl->m_terminalDisplay, &TerminalDisplay::changedCursonPosition,
+            this, &QTermWidget::onChangedCursorPosition);
+
     //将终端活动状态传给SessionManager单例
     connect(this, SIGNAL(isTermIdle(bool)), SessionManager::instance(), SIGNAL(sessionIdle(bool)));
 }
@@ -619,6 +631,11 @@ void QTermWidget::setTextCodec(QTextCodec *codec)
     }else{
         setIsCodecGB18030(false);
     }
+}
+
+void QTermWidget::setTerminalWordCharacters(const QString &wc)
+{
+    m_impl->m_terminalDisplay->setWordCharacters(wc);
 }
 
 /*******************************************************************************
@@ -993,6 +1010,29 @@ void QTermWidget::cursorChanged(Konsole::Emulation::KeyboardCursorShape cursorSh
     // TODO: A switch to enable/disable DECSCUSR?
     setKeyboardCursorShape(cursorShape);
     setBlinkingCursor(blinkingCursorEnabled);
+}
+
+// Handle Ctrl+Mouse click cursor reposition request from TerminalDisplay
+void QTermWidget::onChangedCursorPosition(int count)
+{
+    if (!m_impl || !m_impl->m_session) {
+        return;
+    }
+    // Send xterm-style sequence CSI <count> ` (Move cursor to absolute column)
+    // and CSI <count> d (Move cursor to absolute row) depending on sign.
+    // Here 'count' is a linear offset relative to current cursor position over the grid;
+    // to keep behavior reasonable, forward as a repeated Left/Right moves.
+    if (count == 0) {
+        return;
+    }
+
+    // Choose keys to emulate: positive → Right, negative → Left
+    const int steps = std::abs(count);
+    const int key = count > 0 ? Qt::Key_Right : Qt::Key_Left;
+    for (int i = 0; i < steps; ++i) {
+        QKeyEvent e(QEvent::KeyPress, key, Qt::NoModifier);
+        m_impl->m_session->sendKeyEvent(&e);
+    }
 }
 
 void QTermWidget::setMargin(int margin)

@@ -21,11 +21,13 @@
 
 #include <QApplication>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QFontDatabase>
 #include <QLoggingCategory>
 #include <QCollator>
 #include <QProcessEnvironment>
 #include <QJsonDocument>
+#include <QHBoxLayout>
 
 DWIDGET_USE_NAMESPACE
 #define PRIVATE_PROPERTY_translateContext "_d_DSettingsWidgetFactory_translateContext"
@@ -352,7 +354,17 @@ void Settings::initConnection()
         emit cursorBlinkChanged(value.toBool());
     });
 
-    QPointer<DSettingsOption> backgroundBlur = settings->option("advanced.window.blurred_background");
+    QPointer<DSettingsOption> wordCharacters = settings->option("advanced.cursor.include_special_characters_in_double_click_selections");
+    connect(wordCharacters, &Dtk::Core::DSettingsOption::valueChanged, this, [ = ](QVariant value) {
+        emit wordCharactersChanged(value.toString());
+    });
+
+    QPointer<DSettingsOption> cursorPositionSet = settings->option("advanced.cursor.set_cursor_position");
+    connect(cursorPositionSet, &Dtk::Core::DSettingsOption::valueChanged, this, [ = ](QVariant value) {
+        emit enableSetCursorPosition(value.toBool());
+    });
+
+    QPointer<DSettingsOption> backgroundBlur = settings->option("basic.interface.blurred_background");
     connect(backgroundBlur, &Dtk::Core::DSettingsOption::valueChanged, this, [ = ](QVariant value) {
         qCDebug(tsettings) << "Background blur changed:" << value.toBool();
         emit backgroundBlurChanged(value.toBool());
@@ -363,6 +375,12 @@ void Settings::initConnection()
     connect(fontSize, &Dtk::Core::DSettingsOption::valueChanged, this, [ = ](QVariant value) {
         qCDebug(tsettings) << "Font size changed:" << value.toInt();
         emit fontSizeChanged(value.toInt());
+    });
+
+    QPointer<DSettingsOption> historySize = settings->option("advanced.scroll.history_size");
+    connect(historySize, &Dtk::Core::DSettingsOption::valueChanged, this, [ = ](QVariant value) {
+        qInfo() << "History size changed to" << value.toInt();
+        emit historySizeChanged(value.toInt());
     });
 
     QPointer<DSettingsOption> family = settings->option("basic.interface.font");
@@ -407,6 +425,12 @@ qreal Settings::opacity() const
 {
     qCDebug(tsettings) << "Getting opacity value";
     return settings->option("basic.interface.opacity")->value().toInt() / 100.0;
+}
+
+int Settings::QuakeDuration() const
+{
+    const int step = settings->option("advanced.window.quake_window_animation_duration")->data("step").toInt();
+    return settings->option("advanced.window.quake_window_animation_duration")->value().toInt() * step;
 }
 
 QString Settings::encoding() const
@@ -529,12 +553,19 @@ bool Settings::cursorBlink() const
     return blink;
 }
 
+bool Settings::enableSetCursorPosition() const
+{
+    return settings->option("advanced.cursor.set_cursor_position")->value().toBool();
+}
+
 bool Settings::backgroundBlur() const
 {
-    // qCDebug(tsettings) << "Getting background blur setting";
-    bool blur = settings->option("advanced.window.blurred_background")->value().toBool();
-    // qCDebug(tsettings) << "Background blur:" << blur;
-    return blur;
+    return settings->option("basic.interface.blurred_background")->value().toBool();
+}
+
+int Settings::historySize() const
+{
+    return settings->option("advanced.scroll.history_size")->value().toInt();
 }
 
 
@@ -585,6 +616,11 @@ void Settings::setExtendColorScheme(const QString &name)
         return;
     }
     settings->option("basic.interface.expand_theme")->setValue(name);
+}
+
+QString Settings::wordCharacters() const
+{
+    return settings->option("advanced.cursor.include_special_characters_in_double_click_selections")->value().toString();
 }
 
 /*******************************************************************************
@@ -679,6 +715,10 @@ void Settings::handleWidthFont()
     qCDebug(tsettings) << "Width font handling completed";
 }
 
+bool Settings::disableControlFlow(void)
+{
+    return settings->option("advanced.shell.disable_ctrl_flow")->value().toBool();
+}
 
 bool Settings::enableControlFlow(void)
 {
@@ -686,6 +726,16 @@ bool Settings::enableControlFlow(void)
     bool enable = !settings->option("advanced.shell.enable_ctrl_flow")->value().toBool();
     // qCDebug(tsettings) << "Control flow enabled:" << enable;
     return enable;
+}
+
+bool Settings::enableDebuginfod()
+{
+    return settings->option("advanced.debuginfod.enable_debuginfod")->value().toBool();
+}
+
+QString Settings::debuginfodUrls()
+{
+    return settings->option("advanced.debuginfod.debuginfod_urls")->value().toString();
 }
 
 /******** Add by ut001000 renfeixiang 2020-06-15:增加 每次显示设置界面时，更新设置的等宽字体 End***************/
@@ -783,11 +833,50 @@ QPair<QWidget *, QWidget *> Settings::createCustomSliderHandle(QObject *obj)
     return optionWidget;
 }
 
+QPair<QWidget *, QWidget *> Settings::createValSliderHandle(QObject *obj)
+{
+    auto option = qobject_cast<DTK_CORE_NAMESPACE::DSettingsOption *>(obj);
+    DSlider *slider = new DSlider;
+    QStringList valTicksList;
+    const int maxVal = option->data("max").toInt();
+    const int minVal = option->data("min").toInt();
+    const int step = option->data("step").toInt();
+
+    valTicksList << tr("Fast");
+    for (int i = 0; i < ((maxVal - minVal) / step - 1); i++)
+    {
+        valTicksList << "";
+    }
+    valTicksList << tr("Slow");
+    slider->setMaximum(maxVal / step);
+    slider->setMinimum(minVal / step);
+    slider->setValue(instance()->QuakeDuration() / step);
+    slider->slider()->setTickInterval(1);
+    slider->setRightTicks(valTicksList);
+    slider->setProperty("handleType", "Vernier");
+    QPair<QWidget *, QWidget *> optionWidget = DSettingsWidgetFactory::createStandardItem(QByteArray(), option, slider);
+
+    connect(option, &DSettingsOption::valueChanged, slider, [ = ](QVariant var) {
+        slider->setValue(var.toInt());
+    });
+
+    option->connect(slider, &DSlider::valueChanged, option, [ = ](QVariant var) {
+        option->setValue(var.toInt());
+    });
+
+    return optionWidget;
+}
+
 QPair<QWidget *, QWidget *> Settings::createSpinButtonHandle(QObject *obj)
 {
     auto option = qobject_cast<DTK_CORE_NAMESPACE::DSettingsOption *>(obj);
     auto rightWidget = new NewDspinBox();
 
+    // 使用新的setRange方法来设置范围，这将自动更新验证器
+    int minValue = option->data("min").toInt();
+    int maxValue = option->data("max").toInt();
+    rightWidget->setRange(minValue, maxValue);
+    rightWidget->setSingleStep(option->data("step").toInt());
     rightWidget->setValue(option->value().toInt());
 
     QPair<QWidget *, QWidget *> optionWidget =
@@ -977,5 +1066,25 @@ void Settings::setConsoleShell(const QString shellName)
             break;
         }
     }
+}
+
+bool Settings::ScrollWheelZoom()
+{
+    return settings->option("advanced.scroll.zoom_on_ctrl_scrollwheel")->value().toBool();
+}
+
+bool Settings::OpacityCtrlAltScrollWheel()
+{
+    // 为兼容性保留旧键，优先读取新键（Ctrl+Shift+Up/Down）
+    if (auto newOpt = settings->option("advanced.scroll.opacity_on_ctrl_shift_updown")) {
+        return newOpt->value().toBool();
+    }
+    if (auto shiftOpt = settings->option("advanced.scroll.opacity_on_shift_scrollwheel")) {
+        return shiftOpt->value().toBool();
+    }
+    if (auto oldOpt = settings->option("advanced.scroll.opacity_on_ctrl_alt_scrollwheel")) {
+        return oldOpt->value().toBool();
+    }
+    return true; // 默认开启
 }
 

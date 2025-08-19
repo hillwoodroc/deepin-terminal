@@ -50,6 +50,12 @@ public:
      */
     qreal opacity() const;
     /**
+     * @brief 设置界面雷神模式的显示/隐藏动画时间
+     * @author Archie Meng
+     * @return
+     */
+    int QuakeDuration() const;
+    /**
      * @brief 设置界面获取光标形状
      * @author ut001121 zhangmeng
      * @return
@@ -61,6 +67,7 @@ public:
      * @return
      */
     bool cursorBlink() const;
+    bool enableSetCursorPosition() const;
     /**
      * @brief 设置界面获取背景模糊属性
      * @author ut001121 zhangmeng
@@ -96,6 +103,7 @@ public:
      * @author ut001121 zhangmeng
      * @return
      */
+    QString wordCharacters() const;
     bool PressingScroll();
     /**
      * @brief 设置界面获取输出时是否是滚动
@@ -103,6 +111,14 @@ public:
      * @return
      */
     bool OutputtingScroll();
+    /**
+     * @brief 设置界面获取是否允许Ctrl+滚轮扩缩字体
+     * @author chenzhiwei
+     * @return
+     */
+    bool ScrollWheelZoom();
+    // 是否允许 Ctrl+Alt+滚轮 调整透明度
+    bool OpacityCtrlAltScrollWheel();
 //    void reload();
     /**
      * @brief 标签标题
@@ -196,6 +212,18 @@ public:
      * @return
      */
     bool enableControlFlow(void);
+    bool disableControlFlow(void);
+    // 是否启用debuginfod：设置或取消DEBUGINFOD_URLS环境变量
+    bool enableDebuginfod();
+    // deepin-terminal设置的DEBUGINFOD_URLS环境变量值
+    QString debuginfodUrls();
+
+    /**
+     * @brief 历史记录行数
+     * @author Archie Meng
+     * @return
+     */
+    int historySize() const;
 
     void setFontSize(const int size);
     void setFontName(const QString font);
@@ -239,6 +267,13 @@ public:
      * @return
      */
     static QPair<QWidget *, QWidget *> createCustomSliderHandle(QObject *obj);
+    /**
+     * @brief 自定义valSlider控件样式
+     * @author Archie Meng
+     * @param obj 对象
+     * @return
+     */
+    static QPair<QWidget *, QWidget *> createValSliderHandle(QObject *obj);
     /**
      * @brief 自定义SpinButton控件样式
      * @author ut000439 wangpeili
@@ -289,6 +324,9 @@ signals:
     void OutputScrollChanged(bool enabled);
     void fontSizeChanged(int fontSize);
     void fontChanged(QString fontName);
+    void wordCharactersChanged(QString wordCharacters);
+    void enableSetCursorPosition(bool enable);
+    void historySizeChanged(int historySize);
 
     // 设置中的标签标题格式变化
     void tabFormatChanged(const QString &tabFormat);

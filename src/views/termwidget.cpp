@@ -21,6 +21,8 @@
 #include <DDialog>
 #include <DFloatingMessage>
 #include <DMessageManager>
+#include <DWindowManagerHelper>
+#include <DSettingsOption>
 
 #include <QApplication>
 #include <QKeyEvent>
@@ -54,7 +56,22 @@ TermWidget::TermWidget(const TermProperties &properties, QWidget *parent) : QTer
     m_page = static_cast<TermWidgetPage *>(parentWidget());
     setContextMenuPolicy(Qt::CustomContextMenu);
 
-    setHistorySize(5000);
+    qInfo() << "Setting initial history size:" << Settings::instance()->historySize();
+    setHistorySize(Settings::instance()->historySize());
+    setTerminalWordCharacters(Settings::instance()->wordCharacters());
+
+    // 设置系统环境变量 - 这是必须的，确保shell能正确显示提示符和支持tab补全
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    
+    // 设置debuginfod
+    if (Settings::instance()->enableDebuginfod()) {
+        if (!env.contains("DEBUGINFOD_URLS")) {
+            env.insert("DEBUGINFOD_URLS", Settings::instance()->debuginfodUrls());
+        }
+    }
+    
+    // 将系统环境变量传递给终端，确保PS1、USER、HOME、PATH等重要变量可用
+    setEnvironment(env.toStringList());
 
     QString strShellPath = Settings::instance()->shellPath();
     // set shell program
@@ -130,6 +147,8 @@ TermWidget::TermWidget(const TermProperties &properties, QWidget *parent) : QTer
     setKeyboardCursorShape(static_cast<QTermWidget::KeyboardCursorShape>(Settings::instance()->cursorShape()));
     // 光标闪烁
     setBlinkingCursor(Settings::instance()->cursorBlink());
+    // 设置是否启用Ctrl+鼠标点击设置光标位置
+    enableSetCursorPosition(Settings::instance()->enableSetCursorPosition());
 
     // 按键滚动
     setPressingScroll(Settings::instance()->PressingScroll());
@@ -206,6 +225,10 @@ void TermWidget::initConnections()
     connect(this, &TermWidget::copyAvailable, this, &TermWidget::onCopyAvailable);
 
     connect(Settings::instance(), &Settings::terminalSettingChanged, this, &TermWidget::onSettingValueChanged);
+    connect(Settings::instance(), &Settings::historySizeChanged, this, [this] (int newHistorySize) {
+        qInfo() << "Setting new history size:" << newHistorySize;
+        setHistorySize(newHistorySize);
+    });
 
     //窗口特效开启则使用设置的透明度，窗口特效关闭时直接把窗口置为不透明
     connect(Service::instance(), &Service::onWindowEffectEnabled, this, &TermWidget::onWindowEffectEnabled);
@@ -967,6 +990,10 @@ void TermWidget::initTabTitle()
     // 标签标题变化，则每个term变化
     connect(Settings::instance(), &Settings::tabFormatChanged, this, &TermWidget::setTabFormat);
     connect(Settings::instance(), &Settings::remoteTabFormatChanged, this, &TermWidget::setRemoteTabFormat);
+    // TODO: Fix this signal connection - enableSetCursorPosition signal not properly implemented
+    // connect(Settings::instance(), &Settings::enableSetCursorPosition, this, [this](bool enable) {
+    //     enableSetCursorPosition(enable);
+    // });
 }
 
 void TermWidget::initTabTitleArgs()
@@ -1217,6 +1244,10 @@ void TermWidget::onSettingValueChanged(const QString &keyName)
         return;
     }
 
+    if ("advanced.cursor.set_cursor_position" == keyName) {
+        enableSetCursorPosition(Settings::instance()->enableSetCursorPosition());
+    }
+
     if ("advanced.scroll.scroll_on_key" == keyName) {
         qCDebug(views) << "Enter TermWidget::onSettingValueChanged: advanced.scroll.scroll_on_key";
         setPressingScroll(Settings::instance()->PressingScroll());
@@ -1243,8 +1274,32 @@ void TermWidget::onSettingValueChanged(const QString &keyName)
                 << ", auto effective when happen";
         return;
     }
+    
+    if ("advanced.cursor.include_special_characters_in_double_click_selections" == keyName) {
+        setTerminalWordCharacters(Settings::instance()->wordCharacters());
+        return;
+    }
 
-    qCInfo(views) << "settingValue[" << keyName << "] changed is not effective";
+    if ("advanced.shell.disable_ctrl_flow" == keyName) {
+        setFlowControlEnabled(!Settings::instance()->disableControlFlow());
+        return;
+    }
+
+    if ("advanced.debuginfod.enable_debuginfod" == keyName) {
+        if (!hasRunningProcess()) {
+            if (Settings::instance()->enableDebuginfod()) {
+                sendText(QString("test -z $DEBUGINFOD_URLS && export DEBUGINFOD_URLS=\"%1\"\n").arg(Settings::instance()->debuginfodUrls()));
+            } else {
+                sendText("test -z $DEBUGINFOD_URLS || unset DEBUGINFOD_URLS\n");
+            }
+        } else {
+            // Todo(ArchieMeng): Should handle the situation when there is a running process. It should wait until all running processes being exited.
+            showShellMessage(tr("The debuginfod settings will be effective after restart"));
+        }
+        return;
+    }
+
+    qInfo() << "settingValue[" << keyName << "] changed is not effective";
 }
 
 void TermWidget::onDropInUrls(const char *urls)
@@ -1271,8 +1326,7 @@ inline void TermWidget::onTouchPadSignal(QString name, QString direction, int fi
 {
     qCDebug(views) << "Enter TermWidget::onTouchPadSignal";
     // 当前窗口被激活,且有焦点
-    if (isActiveWindow() && hasFocus()) {
-        qCDebug(views) << "Branch: isActiveWindow and hasFocus";
+    if (isActiveWindow() && hasFocus() && Settings::instance()->ScrollWheelZoom()) {
         if (name == "pinch" && fingers == 2) {
             if (direction == "in") {
                 // 捏合 in是手指捏合的方向 向内缩小
@@ -1312,25 +1366,30 @@ void TermWidget::onShellMessage(QString currentShell, bool isSuccess)
 
 void TermWidget::wheelEvent(QWheelEvent *event)
 {
-    // qCDebug(views) << "Enter TermWidget::wheelEvent";
+    int directionY = event->angleDelta().y();
+    if (directionY == 0) {
+        // 兼容触控板等设备
+        directionY = event->pixelDelta().y();
+    }
+    bool handled = false;
     // 当前窗口被激活,且有焦点
     if (isActiveWindow() && hasFocus()) {
-        // qCDebug(views) << "Branch: isActiveWindow and hasFocus";
-        if (Qt::ControlModifier == event->modifiers()) {
-            int directionY = event->angleDelta().y();
+        // Ctrl + 滚轮 缩放字体（保留原行为，由开关控制）
+        if (Settings::instance()->ScrollWheelZoom() && event->modifiers() == Qt::ControlModifier) {
             if (directionY < 0) {
                 qCDebug(views) << "Branch: directionY is less than 0, zooming out";
-                // 向下缩小
-                zoomOut();  // zoom out 缩小
+                zoomOut();  // 缩小
             } else {
                 qCDebug(views) << "Branch: directionY is greater than 0, zooming in";
-                // 向上放大
-                zoomIn();   // zoom in 放大
+                zoomIn();   // 放大
             }
-            return;
+            handled = true;
         }
     }
-    QTermWidget::wheelEvent(event);
+
+    if (!handled) {
+        QTermWidget::wheelEvent(event);
+    }
 }
 
 void TermWidget::showFlowMessage(bool show)

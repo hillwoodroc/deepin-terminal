@@ -1597,6 +1597,7 @@ void MainWindow::initConnections()
 {
     qCDebug(mainprocess) << "Enter MainWindow::initConnections";
     connect(this, &MainWindow::mainwindowClosed, WindowsManager::instance(), &WindowsManager::onMainwindowClosed);
+    connect(Settings::instance(), &Settings::terminalSettingChanged, this, &MainWindow::onTerminalSettingChanged);
     connect(Settings::instance(), &Settings::windowSettingChanged, this, &MainWindow::onWindowSettingChanged);
     connect(Settings::instance(), &Settings::shortcutSettingChanged, this, &MainWindow::onShortcutSettingChanged);
     connect(this, &MainWindow::newWindowRequest, this, &MainWindow::onCreateNewWindow);
@@ -1712,6 +1713,32 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (term->isActiveWindow())
                 term->showFlowMessage(false);
         }
+
+        // Ctrl+Shift+Up/Down 调整透明度
+        if ((keyEvent->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) && 
+            Settings::instance()->OpacityCtrlAltScrollWheel() &&
+            (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down)) {
+            
+            int current = Settings::instance()->settings->option("basic.interface.opacity")->value().toInt();
+            int step = 5; // 每次调整5%
+            int newOpacity;
+            
+            if (keyEvent->key() == Qt::Key_Up) {
+                newOpacity = current + step; // Up键增加透明度（更不透明）
+            } else {
+                newOpacity = current - step; // Down键减少透明度（更透明）
+            }
+            
+            // 与设置界面滑块保持一致（范围 20-100）
+            newOpacity = qBound(20, newOpacity, 100);
+            qInfo() << Q_FUNC_INFO << "Ctrl+Shift+" << (keyEvent->key() == Qt::Key_Up ? "Up" : "Down") 
+                    << "opacity change from" << current << "to" << newOpacity;
+            
+            // 只修改设置值，让 Settings::terminalSettingChanged 信号触发更新
+            Settings::instance()->settings->option("basic.interface.opacity")->setValue(newOpacity);
+            
+            return true; // 事件已处理
+        }
     }
 
     //if (watched == this) {
@@ -1776,15 +1803,16 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     return DMainWindow::eventFilter(watched, event);
 }
 
-
-void MainWindow::onWindowSettingChanged(const QString &keyName)
+void MainWindow::onTerminalSettingChanged(const QString &keyName)
 {
-    qCDebug(mainprocess) << "Enter MainWindow::onWindowSettingChanged";
-    if (QStringLiteral("advanced.window.blurred_background") == keyName) {
+    if (QStringLiteral("basic.interface.blurred_background") == keyName) {
         setEnableBlurWindow(Settings::instance()->backgroundBlur());
         return;
     }
+}
 
+void MainWindow::onWindowSettingChanged(const QString &keyName)
+{
     // use_on_starting重启生效
     if (keyName == QStringLiteral("advanced.window.use_on_starting")) {
         QString state = Settings::instance()->settings->option("advanced.window.use_on_starting")->value().toString();
@@ -2814,6 +2842,7 @@ void NormalWindow::initTitleBar()
     titlebar()->setCustomWidget(m_titleBar);
     titlebar()->setTitle("");
     titlebar()->setIcon(QIcon::fromTheme("deepin-terminal"));
+    titlebar()->setAutoHideOnFullscreen(true);
 
     //设置titlebar焦点策略为不抢占焦点策略，防止点击titlebar后终端失去输入焦点
     titlebar()->setFocusPolicy(Qt::NoFocus);
@@ -3333,7 +3362,9 @@ int QuakeWindow::getQuakeAnimationTime()
 #endif
     //quakeAnimationBaseTime+quakeAnimationHighDistributionTotalTime的时间是雷神窗口最大高度时动画效果时间
     //动画时间计算方法：3quakeAnimationBaseTime加上(quakeAnimationHighDistributionTotalTime乘以当前雷神高度除以雷神最大高度)所得时间，为各个高度时动画时间
-    int durationTime = quakeAnimationBaseTime + quakeAnimationHighDistributionTotalTime * this->getQuakeHeight() / (screenRect.height() * 2 / 3);
+    int quakeAnimationBaseTime = Settings::instance()->QuakeDuration() * 2 / 3;
+    int quakeAnimationHighDistributionTotalTime = Settings::instance()->QuakeDuration() / 3;
+    int durationTime = quakeAnimationBaseTime + 1.5 * quakeAnimationHighDistributionTotalTime * this->getQuakeHeight() / screenRect.height();
     return durationTime;
 }
 

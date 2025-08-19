@@ -119,6 +119,8 @@ public:
     // Text codec, default is UTF-8
     void setTextCodec(QTextCodec *codec);
 
+    void setTerminalWordCharacters(const QString &wc);
+
     /** @brief Sets the color scheme, default is white on black
      *
      * @param[in] name The name of the color scheme, either returned from
@@ -271,6 +273,8 @@ public:
     void setDrawLineChars(bool drawLineChars);
 
     void setBoldIntense(bool boldIntense);
+    
+    void enableSetCursorPosition(bool enable);
 
     // 获取是否允许输出时滚动
     bool getIsAllowScroll() const;
@@ -386,6 +390,8 @@ protected slots:
     void selectionChanged(bool textSelected);
 
 private slots:
+    // Handle Ctrl+Mouse click cursor reposition request from TerminalDisplay
+    void onChangedCursorPosition(int count);
     void matchFound(int startColumn, int startLine, int endColumn, int endLine, int lastBackwardsPosition, int loseChinese, int matchChinese);
 
     /**
