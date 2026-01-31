@@ -721,8 +721,6 @@ QPixmap TabBar::createDragPixmapFromTab(int index, const QStyleOptionTab &option
     // qCDebug(views) << "Enter TabBar::createDragPixmapFromTab with index:" << index;
     Q_UNUSED(option)
 
-    const qreal ratio = qApp->devicePixelRatio();
-
     QString termIdentifer = identifier(index);
     MainWindow *w = qobject_cast<MainWindow *>(this->window());
     if(!w)
@@ -732,12 +730,11 @@ QPixmap TabBar::createDragPixmapFromTab(int index, const QStyleOptionTab &option
     int width = termPage->width();
     int height =  termPage->height();
     QImage screenshotImage(width, height, QImage::Format_ARGB32_Premultiplied);
-    screenshotImage.setDevicePixelRatio(ratio);
     termPage->render(&screenshotImage, QPoint(), QRegion(0, 0, width, height));
 
-    // 根据对应的ration缩放图像
-    int scaledWidth = static_cast<int>((width * ratio) / 5);
-    int scaledHeight = static_cast<int>((height * ratio) / 5);
+    // 缩放图像
+    int scaledWidth = width / 5;
+    int scaledHeight = height / 5;
     auto scaledImage = screenshotImage.scaled(scaledWidth, scaledHeight, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 
     const int shadowRadius = 10;
@@ -767,8 +764,8 @@ QPixmap TabBar::createDragPixmapFromTab(int index, const QStyleOptionTab &option
         rectPath.addRect(0, 0, scaledWidth + shadowRadius, scaledHeight + shadowRadius);
         roundedRectPath.addRoundedRect(QRectF(0,
                                               0,
-                                              (scaledWidth / ratio) + shadowRadius,
-                                              (scaledHeight) / ratio + shadowRadius),
+                                              scaledWidth + shadowRadius,
+                                              scaledHeight + shadowRadius),
                                        cornerRadius,
                                        cornerRadius);
 
